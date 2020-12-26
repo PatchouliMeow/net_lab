@@ -23,8 +23,36 @@
  */
 void ip_in(buf_t *buf)
 {
-    // TODO 
+    // TODO
+    ip_hdr_t ip_hdr;
+    memcpy(&ip_hdr, buf->data, sizeof(ip_hdr_t));
+    // 版本号 首部长度
+    if(ip_hdr.version != IP_VERSION_4 || ip_hdr.hdr_len < 5 || ip_hdr.hdr_len > 15)
+        return;
+    // 总长度
+    if(ip_hdr.total_len < 20)
+        return;
+    
+    uint16_t sum = ip_hdr.hdr_checksum;
+    ip_hdr.hdr_checksum = 0;
+    if(sum != checksum16((uint16_t *)&ip_hdr, sizeof(ip_hdr_t)))
+        return;
 
+    if(memcmp(ip_hdr.dest_ip, net_if_ip, 4))
+        return;
+
+    if(ip_hdr.protocol == NET_PROTOCOL_ICMP)
+    {
+        buf_remove_header(buf, 14);
+        icmp_in(buf, ip_hdr.src_ip);
+    }
+    else if(ip_hdr.protocol == NET_PROTOCOL_UDP)
+    {
+        buf_remove_header(buf, 14);
+        udp_in(buf, ip_hdr.src_ip);
+    }
+    else
+        icmp_unreachable(buf, ip_hdr.src_ip, ICMP_CODE_PROTOCOL_UNREACH);
 }
 
 /**
@@ -44,7 +72,27 @@ void ip_in(buf_t *buf)
 void ip_fragment_out(buf_t *buf, uint8_t *ip, net_protocol_t protocol, int id, uint16_t offset, int mf)
 {
     // TODO
-    
+    buf_add_header(buf, sizeof(ip_hdr_t));
+
+    ip_hdr_t ip_hdr;
+    ip_hdr.hdr_len = sizeof(ip_hdr_t) / 4;  // 首部长, 4字节为单位
+    ip_hdr.version = IP_VERSION_4;          // 版本号
+    ip_hdr.tos = 0;                         // 服务类型
+    ip_hdr.total_len = swap16(buf->len);    // 总长度
+    ip_hdr.id = swap16(id);                 // 标识符
+    if(mf == 1)                             // 标志与分段
+        ip_hdr.flags_fragment = IP_MORE_FRAGMENT | swap16(offset);
+    else
+        ip_hdr.flags_fragment = swap16(offset); 
+    ip_hdr.ttl = IP_DEFALUT_TTL;            // 存活时间
+    ip_hdr.protocol = protocol;             // 上层协议
+    ip_hdr.hdr_checksum = 0;                // 首部校验和
+    memcpy(ip_hdr.src_ip, net_if_ip, 4);
+    memcpy(ip_hdr.dest_ip, ip, 4);
+    ip_hdr.hdr_checksum = checksum16((uint16_t *)&ip_hdr, sizeof(ip_hdr_t));
+    memcpy(buf->data, &ip_hdr, sizeof(ip_hdr_t));
+
+    arp_out(buf, ip, NET_PROTOCOL_IP);
 }
 
 /**
@@ -67,6 +115,24 @@ void ip_fragment_out(buf_t *buf, uint8_t *ip, net_protocol_t protocol, int id, u
  */
 void ip_out(buf_t *buf, uint8_t *ip, net_protocol_t protocol)
 {
-    // TODO 
-    
+    // TODO
+    static int id = 0;  // 静态变量
+    int max_len = 1500 - sizeof(ip_hdr_t);
+    uint16_t length = buf->len;
+    uint16_t offset = 0;
+    if(length > max_len)
+    {
+        while(length > max_len)
+        {
+            buf->len = max_len;
+            ip_fragment_out(buf, ip, protocol, id, offset, 1);
+            buf->data += 1500;  // ip_fragment_out函数里给当前分片添加了ip数据报头，指针有变化
+            length -= max_len;
+            offset += max_len / 8;
+        }
+        buf->len = length;
+        ip_fragment_out(buf, ip, protocol, id++, offset, 0);
+    }
+    else
+        ip_fragment_out(buf, ip, protocol, id++, 0, 0);
 }
