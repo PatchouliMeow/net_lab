@@ -17,7 +17,17 @@
 void ethernet_in(buf_t *buf)
 {
     // TODO
-    
+    uint16_t type = (uint16_t)buf->data[12] << 8 | buf->data[13];
+    if(type == NET_PROTOCOL_ARP)
+    {
+        buf_remove_header(buf, 14);
+        arp_in(buf);
+    }
+    else if(type == NET_PROTOCOL_IP)
+    {
+        buf_remove_header(buf, 14);
+        ip_in(buf);
+    }
 }
 
 /**
@@ -32,7 +42,15 @@ void ethernet_in(buf_t *buf)
 void ethernet_out(buf_t *buf, const uint8_t *mac, net_protocol_t protocol)
 {
     // TODO
+    buf_add_header(buf, sizeof(ether_hdr_t));
 
+    ether_hdr_t ether_hdr;  // 以太网包头
+    memcpy(ether_hdr.dest, mac, NET_MAC_LEN);
+    memcpy(ether_hdr.src, net_if_mac, NET_MAC_LEN);
+    ether_hdr.protocol = swap16(protocol);
+
+    memcpy(buf->data, &ether_hdr, sizeof(ether_hdr_t));
+    driver_send(buf);
 }
 
 /**
