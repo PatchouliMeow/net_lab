@@ -217,7 +217,7 @@ void arp_out(buf_t *buf, uint8_t *ip, net_protocol_t protocol)
         // 将来自IP层的数据包缓存到arp_buf中
         // 等待arp_in()能收到ARP request报文的应答报文
         arp_buf.valid = 1;
-        arp_buf.buf = *buf;
+        buf_copy(&arp_buf.buf, buf);
         memcpy(arp_buf.ip, ip, 4);
         arp_buf.protocol = protocol;
     }

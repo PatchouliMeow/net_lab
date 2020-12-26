@@ -43,12 +43,12 @@ void ip_in(buf_t *buf)
 
     if(ip_hdr.protocol == NET_PROTOCOL_ICMP)
     {
-        buf_remove_header(buf, 14);
+        buf_remove_header(buf, sizeof(ip_hdr_t));
         icmp_in(buf, ip_hdr.src_ip);
     }
     else if(ip_hdr.protocol == NET_PROTOCOL_UDP)
     {
-        buf_remove_header(buf, 14);
+        buf_remove_header(buf, sizeof(ip_hdr_t));
         udp_in(buf, ip_hdr.src_ip);
     }
     else
