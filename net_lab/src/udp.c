@@ -29,7 +29,31 @@ static udp_entry_t udp_table[UDP_MAX_HANDLER];
 static uint16_t udp_checksum(buf_t *buf, uint8_t *src_ip, uint8_t *dest_ip)
 {
     // TODO
+    udp_hdr_t udp_hdr;
+    memcpy(&udp_hdr, buf->data, sizeof(udp_hdr_t));
+
+    buf_add_header(buf, sizeof(udp_peso_hdr_t));
+
+    // 将IP头部拷贝出来，暂存被UDP伪头部覆盖的IP头部
+    udp_peso_hdr_t ip_hdr_part;
+    memcpy(&ip_hdr_part, buf->data, sizeof(udp_peso_hdr_t));
+
+    udp_peso_hdr_t udp_peso_hdr;
+    memcpy(&udp_peso_hdr, buf->data, sizeof(udp_peso_hdr_t));
+    memcpy(udp_peso_hdr.src_ip, src_ip, 4);         // 源IP地址
+    memcpy(udp_peso_hdr.dest_ip, dest_ip, 4);       // 目的IP地址
+    udp_peso_hdr.placeholder = 0;                   // 必须置0,用于填充对齐
+    udp_peso_hdr.protocol = NET_PROTOCOL_UDP;       // 协议号
+    udp_peso_hdr.total_len = udp_hdr.total_len;     // 整个数据包的长度
+    memcpy(buf->data, &udp_peso_hdr, sizeof(udp_peso_hdr_t));
+
+    uint16_t sum = checksum16((uint16_t *)buf->data, sizeof(udp_peso_hdr_t) + swap16(udp_hdr.total_len));
     
+    // 再将暂存的IP头部拷贝回来
+    memcpy(buf->data, &ip_hdr_part, sizeof(udp_peso_hdr_t));
+    buf_remove_header(buf, sizeof(udp_peso_hdr_t));
+
+    return sum;
 }
 
 /**
@@ -53,7 +77,38 @@ static uint16_t udp_checksum(buf_t *buf, uint8_t *src_ip, uint8_t *dest_ip)
 void udp_in(buf_t *buf, uint8_t *src_ip)
 {
     // TODO
+    udp_hdr_t udp_hdr;
+    memcpy(&udp_hdr, buf->data, sizeof(udp_hdr_t));
+    if(swap16(udp_hdr.total_len) > 1500 - sizeof(ip_hdr_t) || swap16(udp_hdr.total_len) < 8)
+        return;
 
+    
+    uint16_t sum = udp_hdr.checksum;
+    udp_hdr.checksum = 0;
+    memcpy(buf->data, &udp_hdr, sizeof(udp_hdr_t));
+    if(sum != udp_checksum(buf, src_ip, net_if_ip))
+        return;
+    
+    buf->len = swap16(udp_hdr.total_len); //buf长度设为真实长度
+
+    udp_hdr.checksum = sum;
+    memcpy(buf->data, &udp_hdr, sizeof(udp_hdr_t));
+
+    // 根据该数据报目的端口号查找udp_table，查看是否有对应的处理函数（回调函数）    
+    for(int i = 0; i < UDP_MAX_HANDLER; i++)
+    {
+        if(udp_hdr.dest_port == swap16(udp_table[i].port) && udp_table[i].valid == 1)
+        {
+            buf_remove_header(buf, sizeof(udp_hdr_t));
+            (*udp_table[i].handler)(&udp_table[i], src_ip, udp_table[i].port, buf);
+            return;
+        }
+    }
+
+    // 没有找到则调用buf_add_header()函数增加IP数据报头部
+    buf_add_header(buf, sizeof(ip_hdr_t));
+
+    icmp_unreachable(buf, src_ip, ICMP_CODE_PORT_UNREACH);
 }
 
 /**
@@ -71,7 +126,18 @@ void udp_in(buf_t *buf, uint8_t *src_ip)
 void udp_out(buf_t *buf, uint16_t src_port, uint8_t *dest_ip, uint16_t dest_port)
 {
     // TODO
+    buf_add_header(buf, sizeof(udp_hdr_t));
 
+    udp_hdr_t udp_hdr;
+    udp_hdr.src_port = swap16(src_port);    // 源端口
+    udp_hdr.dest_port = swap16(dest_port);  // 目标端口
+    udp_hdr.total_len = swap16(buf->len);   // 整个数据包的长度
+    udp_hdr.checksum = 0;                   // 校验和
+    memcpy(buf->data, &udp_hdr, sizeof(udp_hdr_t));
+    udp_hdr.checksum = udp_checksum(buf, net_if_ip, dest_ip);
+    memcpy(buf->data, &udp_hdr, sizeof(udp_hdr_t));
+
+    ip_out(buf, dest_ip, NET_PROTOCOL_UDP);
 }
 
 /**

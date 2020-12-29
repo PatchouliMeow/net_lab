@@ -120,13 +120,15 @@ void ip_out(buf_t *buf, uint8_t *ip, net_protocol_t protocol)
     int max_len = 1500 - sizeof(ip_hdr_t);
     uint16_t length = buf->len;
     uint16_t offset = 0;
+    static buf_t temp;
     if(length > max_len)
     {
         while(length > max_len)
         {
-            buf->len = max_len;
-            ip_fragment_out(buf, ip, protocol, id, offset, 1);
-            buf->data += 1500;  // ip_fragment_out函数里给当前分片添加了ip数据报头，指针有变化
+            buf_init(&temp, max_len);
+            memcpy(temp.data, buf->data, max_len);
+            ip_fragment_out(&temp, ip, protocol, id, offset, 1);
+            buf->data += max_len;  // ip_fragment_out函数里给当前分片添加了ip数据报头，指针有变化
             length -= max_len;
             offset += max_len / 8;
         }
